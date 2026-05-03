@@ -52,7 +52,7 @@ pub struct Runner;
 
 impl Runner {
     /// Run every test in the pack against the target, in pack-declared
-    /// order. The pack_hash is computed deterministically from the
+    /// order. The `pack_hash` is computed deterministically from the
     /// runs.
     #[must_use]
     pub fn run_pack(pack: &Pack, target: &Target) -> PackResult {
@@ -77,7 +77,7 @@ impl Runner {
     }
 
     /// Verify that re-running the pack against the target yields the
-    /// expected pack_hash. Returns `Ok(())` on match, otherwise
+    /// expected `pack_hash`. Returns `Ok(())` on match, otherwise
     /// `Err(actual_hash)` so the caller can log both sides.
     ///
     /// # Errors
@@ -102,7 +102,7 @@ impl Runner {
 /// `pack_id || \0 || pack_version || \0` followed by per-run
 /// `test_id || \0 || test_version || \0 || outcome_tag || \0 [|| reason || \0]`.
 ///
-/// Reordering tests, changing the pack_id, or changing any outcome
+/// Reordering tests, changing the `pack_id`, or changing any outcome
 /// changes the hash. That's the proof property: the same hash means
 /// the same pack ran the same tests in the same order against the
 /// same target with the same outcomes.

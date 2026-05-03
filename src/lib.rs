@@ -12,7 +12,7 @@
 //!
 //! Determinism is non-negotiable: tests must be pure functions of the
 //! target. No `now()`, no PRNG, no env, no network. Same target +
-//! same pack version → byte-identical pack_hash.
+//! same pack version → byte-identical `pack_hash`.
 //!
 //! # Provable statement shape
 //!
@@ -24,7 +24,7 @@
 //!
 //! The first two equalities are checked by `verify_pack`; the third is
 //! also checked by `verify_pack` because a `Fail` in any test makes
-//! the pack_hash differ from the all-pass canonical.
+//! the `pack_hash` differ from the all-pass canonical.
 
 pub mod runner;
 pub mod target;
