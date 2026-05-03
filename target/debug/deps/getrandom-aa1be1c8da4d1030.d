@@ -1,0 +1,11 @@
+/Users/drzzln/code/github/pleme-io/provas/target/debug/deps/getrandom-aa1be1c8da4d1030.d: /Users/drzzln/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/getrandom-0.2.17/src/lib.rs /Users/drzzln/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/getrandom-0.2.17/src/error.rs /Users/drzzln/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/getrandom-0.2.17/src/util.rs /Users/drzzln/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/getrandom-0.2.17/src/util_libc.rs /Users/drzzln/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/getrandom-0.2.17/src/getentropy.rs
+
+/Users/drzzln/code/github/pleme-io/provas/target/debug/deps/libgetrandom-aa1be1c8da4d1030.rlib: /Users/drzzln/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/getrandom-0.2.17/src/lib.rs /Users/drzzln/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/getrandom-0.2.17/src/error.rs /Users/drzzln/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/getrandom-0.2.17/src/util.rs /Users/drzzln/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/getrandom-0.2.17/src/util_libc.rs /Users/drzzln/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/getrandom-0.2.17/src/getentropy.rs
+
+/Users/drzzln/code/github/pleme-io/provas/target/debug/deps/libgetrandom-aa1be1c8da4d1030.rmeta: /Users/drzzln/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/getrandom-0.2.17/src/lib.rs /Users/drzzln/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/getrandom-0.2.17/src/error.rs /Users/drzzln/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/getrandom-0.2.17/src/util.rs /Users/drzzln/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/getrandom-0.2.17/src/util_libc.rs /Users/drzzln/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/getrandom-0.2.17/src/getentropy.rs
+
+/Users/drzzln/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/getrandom-0.2.17/src/lib.rs:
+/Users/drzzln/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/getrandom-0.2.17/src/error.rs:
+/Users/drzzln/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/getrandom-0.2.17/src/util.rs:
+/Users/drzzln/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/getrandom-0.2.17/src/util_libc.rs:
+/Users/drzzln/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/getrandom-0.2.17/src/getentropy.rs:
