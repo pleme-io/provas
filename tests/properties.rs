@@ -1,4 +1,5 @@
 //! Property-based tests for the provas core invariants.
+#![allow(clippy::doc_markdown, clippy::redundant_closure)]
 //!
 //! These complement the targeted unit tests by sweeping random inputs
 //! and asserting the proof framework's load-bearing properties hold

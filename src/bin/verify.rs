@@ -51,6 +51,20 @@ struct Args {
     #[arg(long)]
     manifest_file: Option<String>,
 
+    /// For helm-content packs: path to the chart's `Chart.yaml`.
+    #[arg(long)]
+    chart_yaml: Option<String>,
+
+    /// For helm-content packs: path to the chart's `values.yaml`.
+    #[arg(long)]
+    values_yaml: Option<String>,
+
+    /// For bundle packs: comma-separated list of `digest:kind:pack_hash_hex`
+    /// triples for each member. e.g.
+    /// `--bundle-members sha256:abc:oci-image:dead...,sha256:def:helm-chart:beef...`
+    #[arg(long, value_delimiter = ',')]
+    bundle_members: Vec<String>,
+
     /// Verbose: print every test's outcome, not just the summary.
     #[arg(long)]
     verbose: bool,
@@ -165,40 +179,57 @@ async fn main() -> ExitCode {
     eprintln!();
     eprintln!("Pack resolved: {} v{} ({} tests)", pack.id, pack.version, pack.tests.len());
 
-    // 3. Re-run the pack against the bytes (if provided).
-    let Some(manifest_path) = args.manifest_file else {
-        eprintln!();
-        eprintln!("INFO: no --manifest-file provided; printing stored proof only.");
-        eprintln!("      To verify, supply the artifact's bytes via --manifest-file.");
-        return ExitCode::SUCCESS;
-    };
-    let bytes = match fs::read(&manifest_path) {
-        Ok(b) => b,
-        Err(e) => {
-            eprintln!("FAIL: read manifest file {manifest_path}: {e}");
-            return ExitCode::from(7);
+    // 3. Build the right Target based on pack type.
+    let target = if pack.id.contains("helm-content") {
+        match build_helm_content_target(&args) {
+            Ok(t) => t,
+            Err(e) => {
+                eprintln!("FAIL: helm-content target: {e}");
+                eprintln!("      Supply --chart-yaml + --values-yaml to verify a helm-content pack.");
+                return ExitCode::from(7);
+            }
         }
-    };
-    eprintln!();
-    eprintln!("Manifest file: {manifest_path} ({} bytes)", bytes.len());
-
-    // Sanity: hash of the bytes should equal the artifact digest.
-    let actual_digest = sha256_digest(&bytes);
-    if actual_digest != artifact.digest {
-        eprintln!(
-            "FAIL: bytes hash {actual_digest} does not match artifact digest {} — wrong file?",
-            artifact.digest
-        );
-        return ExitCode::from(8);
-    }
-    eprintln!("✓ manifest bytes hash matches artifact digest ({actual_digest})");
-
-    // Build the right Target shape based on kind / pack id.
-    let target = match build_target(&artifact.kind, &pack.id, bytes) {
-        Ok(t) => t,
-        Err(e) => {
-            eprintln!("FAIL: cannot build Target for kind={} pack={}: {e}", artifact.kind, pack.id);
-            return ExitCode::from(9);
+    } else if pack.id.contains("bundle") {
+        match build_bundle_target(&args) {
+            Ok(t) => t,
+            Err(e) => {
+                eprintln!("FAIL: bundle target: {e}");
+                eprintln!("      Supply --bundle-members <list> to verify a bundle pack.");
+                return ExitCode::from(7);
+            }
+        }
+    } else {
+        // OCI image or helm-as-OCI manifest.
+        let Some(manifest_path) = args.manifest_file else {
+            eprintln!();
+            eprintln!("INFO: no --manifest-file provided; printing stored proof only.");
+            eprintln!("      To verify, supply the artifact's bytes via --manifest-file.");
+            return ExitCode::SUCCESS;
+        };
+        let bytes = match fs::read(&manifest_path) {
+            Ok(b) => b,
+            Err(e) => {
+                eprintln!("FAIL: read manifest file {manifest_path}: {e}");
+                return ExitCode::from(7);
+            }
+        };
+        eprintln!();
+        eprintln!("Manifest file: {manifest_path} ({} bytes)", bytes.len());
+        let actual_digest = sha256_digest(&bytes);
+        if actual_digest != artifact.digest {
+            eprintln!(
+                "FAIL: bytes hash {actual_digest} does not match artifact digest {} — wrong file?",
+                artifact.digest
+            );
+            return ExitCode::from(8);
+        }
+        eprintln!("✓ manifest bytes hash matches artifact digest ({actual_digest})");
+        match build_target(&artifact.kind, &pack.id, bytes) {
+            Ok(t) => t,
+            Err(e) => {
+                eprintln!("FAIL: cannot build Target for kind={} pack={}: {e}", artifact.kind, pack.id);
+                return ExitCode::from(9);
+            }
         }
     };
 
@@ -253,18 +284,72 @@ fn resolve_pack(profile: &str) -> Option<Pack> {
     }
 }
 
-fn build_target(kind: &str, pack_id: &str, bytes: Vec<u8>) -> Result<Target, String> {
-    if pack_id.contains("helm-content") {
-        return Err("helm-content packs require structured chart sources, not just manifest bytes — supply Chart.yaml/values.yaml/templates separately (not yet supported in this CLI)".into());
-    }
-    if pack_id.contains("bundle") {
-        return Err("bundle packs require member triples, not raw manifest bytes — see verify-bundle subcommand (not yet implemented)".into());
-    }
+fn build_target(kind: &str, _pack_id: &str, bytes: Vec<u8>) -> Result<Target, String> {
     match kind {
         "oci-image" => Ok(Target::from_oci_manifest_bytes(bytes)),
         "helm-chart" => Ok(Target::from_helm_manifest_bytes(bytes)),
         other => Err(format!("don't know how to build Target for kind {other:?}")),
     }
+}
+
+fn build_helm_content_target(args: &Args) -> Result<Target, String> {
+    let chart_path = args
+        .chart_yaml
+        .as_ref()
+        .ok_or_else(|| "missing --chart-yaml".to_string())?;
+    let values_path = args
+        .values_yaml
+        .as_ref()
+        .ok_or_else(|| "missing --values-yaml".to_string())?;
+    let chart =
+        fs::read_to_string(chart_path).map_err(|e| format!("read {chart_path}: {e}"))?;
+    let values =
+        fs::read_to_string(values_path).map_err(|e| format!("read {values_path}: {e}"))?;
+    // Templates not loaded by this CLI (would require directory walk);
+    // most helm-content tests don't depend on them today.
+    let templates = std::collections::BTreeMap::new();
+    Target::from_helm_chart_sources(&chart, &values, templates)
+        .map_err(|e| format!("yaml parse: {e}"))
+}
+
+fn build_bundle_target(args: &Args) -> Result<Target, String> {
+    if args.bundle_members.is_empty() {
+        return Err("missing --bundle-members".into());
+    }
+    let mut members = Vec::with_capacity(args.bundle_members.len());
+    for entry in &args.bundle_members {
+        let parts: Vec<&str> = entry.splitn(3, ':').collect();
+        // entry is `sha256:HEX:KIND:PACKHASH_HEX` — splitting on : gives
+        // the digest split at "sha256:HEX" plus the rest. Re-split.
+        let entry = entry.as_str();
+        let kind_idx = entry
+            .find(":oci-image:")
+            .or_else(|| entry.find(":helm-chart:"))
+            .or_else(|| entry.find(":skill:"))
+            .or_else(|| entry.find(":bundle:"))
+            .ok_or_else(|| {
+                format!(
+                    "entry {entry:?} does not contain a kind separator (:oci-image:|:helm-chart:|:skill:|:bundle:); got {} parts",
+                    parts.len()
+                )
+            })?;
+        let digest = entry[..kind_idx].to_string();
+        let after = &entry[kind_idx + 1..]; // skip the leading ':'
+        let (kind, hash_hex) = after
+            .split_once(':')
+            .ok_or_else(|| format!("entry {entry:?} missing pack_hash after kind"))?;
+        let hash_bytes = hex::decode(hash_hex)
+            .map_err(|e| format!("entry {entry:?} pack_hash hex: {e}"))?;
+        let arr: [u8; 32] = hash_bytes
+            .try_into()
+            .map_err(|_| format!("entry {entry:?} pack_hash not 32 bytes"))?;
+        members.push(provas::BundleMember {
+            digest,
+            kind: kind.to_string(),
+            pack_hash: tameshi::hash::Blake3Hash(arr),
+        });
+    }
+    Ok(Target::from_bundle_members(members))
 }
 
 fn sha256_digest(bytes: &[u8]) -> String {
