@@ -32,6 +32,9 @@ sha2 = "0.10"
 [lints.clippy]
 pedantic = "warn"
 
+[dev-dependencies]
+proptest = "1.5"
+
 [profile.release]
 opt-level = "z"
 lto = true

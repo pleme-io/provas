@@ -52,7 +52,7 @@ impl TestOutcome {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TestRun {
     pub test_id: String,
     pub test_version: String,
