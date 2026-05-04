@@ -15,7 +15,13 @@
 //! registry has full proof of the compliance claim. No trust in
 //! pleme-io required.
 
-#![allow(clippy::doc_markdown, clippy::needless_pass_by_value)]
+#![allow(
+    clippy::doc_markdown,
+    clippy::needless_pass_by_value,
+    clippy::too_many_lines,
+    clippy::manual_let_else,
+    clippy::single_match_else
+)]
 
 use std::fs;
 use std::process::ExitCode;

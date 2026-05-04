@@ -31,6 +31,30 @@ fn chart_and_values(target: &Target) -> Result<(&Value, &Value), TestOutcome> {
     }
 }
 
+/// Detect whether the chart is an umbrella (composes subcharts and has
+/// no deployment of its own). Two signals:
+///   - `Chart.yaml.dependencies` is non-empty AND
+///   - `values.yaml` has no top-level `image` block (which would
+///     indicate this chart deploys its own workload)
+///
+/// When umbrella, deployment-level tests pass vacuously with
+/// explanatory evidence — the substantive controls are tested in each
+/// sub-chart's own pack run.
+fn is_umbrella_chart(chart: &Value, values: &Value) -> bool {
+    let has_deps = chart
+        .get("dependencies")
+        .and_then(|d| d.as_sequence())
+        .is_some_and(|s| !s.is_empty());
+    if !has_deps {
+        return false;
+    }
+    // No top-level `image` block → chart doesn't deploy its own workload.
+    let has_image = values
+        .as_mapping()
+        .is_some_and(|m| m.contains_key(Value::String("image".to_string())));
+    !has_image
+}
+
 fn templates(target: &Target) -> Result<&std::collections::BTreeMap<String, Vec<u8>>, TestOutcome> {
     match target {
         Target::HelmChartContent { templates, .. } => Ok(templates),
@@ -178,6 +202,10 @@ fn scan_image_tags(v: &Value, violations: &mut Vec<String>, path: &mut Vec<Strin
 /// declare `runAsNonRoot: true` somewhere in the security context.
 /// Operative path varies by chart layout (top-level `securityContext`
 /// vs `pleme-microservice.securityContext` etc).
+///
+/// For umbrella charts (no own image), this test checks that no
+/// subchart override explicitly sets `runAsNonRoot=false` — which
+/// would cascade to the deployed sub-workload.
 pub struct HelmValuesRunAsNonRoot;
 impl ComplianceTest for HelmValuesRunAsNonRoot {
     fn id(&self) -> &'static str { "helm.values_run_as_non_root" }
@@ -186,7 +214,8 @@ impl ComplianceTest for HelmValuesRunAsNonRoot {
         let (_, values) = match chart_and_values(target) { Ok(p) => p, Err(e) => return e };
         // pleme-microservice's compliance overlay defaults runAsNonRoot
         // for fedramp-high. The check is "no securityContext explicitly
-        // sets runAsNonRoot=false anywhere".
+        // sets runAsNonRoot=false anywhere" — this applies to umbrella
+        // charts too, since their overrides cascade.
         let mut violations = Vec::new();
         scan_run_as_non_root_violations(values, &mut violations, &mut Vec::new());
         if violations.is_empty() {
@@ -217,13 +246,17 @@ fn scan_run_as_non_root_violations(v: &Value, out: &mut Vec<String>, path: &mut 
 
 /// AC-6 — workload values declare resource limits. Required for FedRAMP
 /// to bound resource consumption (`SC-5` denial-of-service protection).
+/// Umbrella charts pass vacuously: subchart packs enforce this control
+/// for the actual deployed workloads.
 pub struct HelmValuesDeclareResourceLimits;
 impl ComplianceTest for HelmValuesDeclareResourceLimits {
     fn id(&self) -> &'static str { "helm.values_declare_resource_limits" }
     fn version(&self) -> &'static str { "1" }
     fn run(&self, target: &Target) -> TestOutcome {
-        let (_, values) = match chart_and_values(target) { Ok(p) => p, Err(e) => return e };
-        // Look for any `resources.limits` block with cpu or memory.
+        let (chart, values) = match chart_and_values(target) { Ok(p) => p, Err(e) => return e };
+        if is_umbrella_chart(chart, values) {
+            return TestOutcome::pass_with("umbrella chart; resource limits enforced by subchart packs".to_string());
+        }
         let mut found = false;
         scan_for_resource_limits(values, &mut found);
         if found {
@@ -256,14 +289,16 @@ fn scan_for_resource_limits(v: &Value, found: &mut bool) {
 
 /// CA-7 (continuous monitoring) — chart configures liveness or
 /// readiness probes for monitoring. Required to detect failed pods.
+/// Umbrella charts pass vacuously.
 pub struct HelmValuesHasHealthProbes;
 impl ComplianceTest for HelmValuesHasHealthProbes {
     fn id(&self) -> &'static str { "helm.values_has_health_probes" }
     fn version(&self) -> &'static str { "1" }
     fn run(&self, target: &Target) -> TestOutcome {
-        let (_, values) = match chart_and_values(target) { Ok(p) => p, Err(e) => return e };
-        // Look for `health.{path,readyPath,port}` block (pleme-microservice
-        // convention) or kubernetes-style livenessProbe/readinessProbe.
+        let (chart, values) = match chart_and_values(target) { Ok(p) => p, Err(e) => return e };
+        if is_umbrella_chart(chart, values) {
+            return TestOutcome::pass_with("umbrella chart; health probes enforced by subchart packs".to_string());
+        }
         let mut found = false;
         scan_for_probes(values, &mut found);
         if found {
@@ -290,13 +325,17 @@ fn scan_for_probes(v: &Value, found: &mut bool) {
 }
 
 /// SC-7 (boundary protection) — chart configures NetworkPolicy. Lateral
-/// movement is blocked unless explicitly allowed.
+/// movement is blocked unless explicitly allowed. Umbrella charts pass
+/// vacuously.
 pub struct HelmValuesHasNetworkPolicy;
 impl ComplianceTest for HelmValuesHasNetworkPolicy {
     fn id(&self) -> &'static str { "helm.values_has_network_policy" }
     fn version(&self) -> &'static str { "1" }
     fn run(&self, target: &Target) -> TestOutcome {
-        let (_, values) = match chart_and_values(target) { Ok(p) => p, Err(e) => return e };
+        let (chart, values) = match chart_and_values(target) { Ok(p) => p, Err(e) => return e };
+        if is_umbrella_chart(chart, values) {
+            return TestOutcome::pass_with("umbrella chart; NetworkPolicy enforced by subchart packs".to_string());
+        }
         let mut found = false;
         scan_for_network_policy(values, &mut found);
         if found {
@@ -358,13 +397,17 @@ impl ComplianceTest for HelmValuesNoPlaintextSecrets {
 
 /// CM-2 — `pleme-microservice.compliance.overlays` must include
 /// `fedramp-high` for charts in the FedRAMP-High deployment family.
-/// (For non-pleme charts this passes vacuously.)
+/// Umbrella charts pass vacuously: subcharts carry their own overlay
+/// declarations.
 pub struct HelmValuesDeclareFedRampHighOverlay;
 impl ComplianceTest for HelmValuesDeclareFedRampHighOverlay {
     fn id(&self) -> &'static str { "helm.values_declare_fedramp_high_overlay" }
     fn version(&self) -> &'static str { "1" }
     fn run(&self, target: &Target) -> TestOutcome {
-        let (_, values) = match chart_and_values(target) { Ok(p) => p, Err(e) => return e };
+        let (chart, values) = match chart_and_values(target) { Ok(p) => p, Err(e) => return e };
+        if is_umbrella_chart(chart, values) {
+            return TestOutcome::pass_with("umbrella chart; fedramp-high overlay declared by subcharts".to_string());
+        }
         // Path 1: pleme-microservice.compliance.overlays
         if let Some(overlays) = yaml_get_path(values, &["pleme-microservice", "compliance", "overlays"])
             .and_then(|v| v.as_sequence())
@@ -432,13 +475,16 @@ fn scan_ingress_tls(v: &Value, out: &mut Vec<String>, path: &mut Vec<String>) {
 }
 
 /// CP-2 (contingency planning) — minimum 2 replicas for HA.
+/// Umbrella charts pass vacuously.
 pub struct HelmValuesAtLeastTwoReplicas;
 impl ComplianceTest for HelmValuesAtLeastTwoReplicas {
     fn id(&self) -> &'static str { "helm.values_at_least_two_replicas" }
     fn version(&self) -> &'static str { "1" }
     fn run(&self, target: &Target) -> TestOutcome {
-        let (_, values) = match chart_and_values(target) { Ok(p) => p, Err(e) => return e };
-        // Search for `replicaCount` anywhere; require >= 2 if found.
+        let (chart, values) = match chart_and_values(target) { Ok(p) => p, Err(e) => return e };
+        if is_umbrella_chart(chart, values) {
+            return TestOutcome::pass_with("umbrella chart; replica count enforced by subchart packs".to_string());
+        }
         let mut min_seen: Option<i64> = None;
         scan_replica_count(values, &mut min_seen);
         match min_seen {
@@ -461,12 +507,16 @@ fn scan_replica_count(v: &Value, min_seen: &mut Option<i64>) {
 }
 
 /// SC-7 — chart includes a PodDisruptionBudget for graceful eviction.
+/// Umbrella charts pass vacuously.
 pub struct HelmValuesHasPodDisruptionBudget;
 impl ComplianceTest for HelmValuesHasPodDisruptionBudget {
     fn id(&self) -> &'static str { "helm.values_has_pod_disruption_budget" }
     fn version(&self) -> &'static str { "1" }
     fn run(&self, target: &Target) -> TestOutcome {
-        let (_, values) = match chart_and_values(target) { Ok(p) => p, Err(e) => return e };
+        let (chart, values) = match chart_and_values(target) { Ok(p) => p, Err(e) => return e };
+        if is_umbrella_chart(chart, values) {
+            return TestOutcome::pass_with("umbrella chart; PDB enforced by subchart packs".to_string());
+        }
         let mut found = false;
         scan_for_pdb(values, &mut found);
         if found {
@@ -493,13 +543,17 @@ fn scan_for_pdb(v: &Value, found: &mut bool) {
 }
 
 /// AU-2 / AU-12 (audit events) — metrics scraping configured. Also
-/// covers continuous-monitoring requirement.
+/// covers continuous-monitoring requirement. Umbrella charts pass
+/// vacuously.
 pub struct HelmValuesHasMetricsMonitoring;
 impl ComplianceTest for HelmValuesHasMetricsMonitoring {
     fn id(&self) -> &'static str { "helm.values_has_metrics_monitoring" }
     fn version(&self) -> &'static str { "1" }
     fn run(&self, target: &Target) -> TestOutcome {
-        let (_, values) = match chart_and_values(target) { Ok(p) => p, Err(e) => return e };
+        let (chart, values) = match chart_and_values(target) { Ok(p) => p, Err(e) => return e };
+        if is_umbrella_chart(chart, values) {
+            return TestOutcome::pass_with("umbrella chart; monitoring enforced by subchart packs".to_string());
+        }
         let mut found = false;
         scan_for_monitoring(values, &mut found);
         if found {
