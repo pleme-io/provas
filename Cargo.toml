@@ -34,6 +34,14 @@ pedantic = "warn"
 
 [dev-dependencies]
 proptest = "1.5"
+# E2E for provas-verify CLI: spin up a real cartorio in-process and
+# point the binary at it.
+cartorio = { git = "https://github.com/pleme-io/cartorio", tag = "v0.4.1" }
+tabeliao = { git = "https://github.com/pleme-io/tabeliao", tag = "v0.6.0" }
+tokio = { version = "1.50", features = ["full"] }
+axum = { version = "0.8", features = ["json"] }
+chrono = { version = "0.4", features = ["serde"] }
+ed25519-dalek = { version = "2.1", features = ["rand_core"] }
 
 [profile.release]
 opt-level = "z"
