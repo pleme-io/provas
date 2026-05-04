@@ -1,4 +1,5 @@
 //! provas — typed compliance-test framework.
+#![allow(clippy::doc_markdown, clippy::doc_lazy_continuation)]
 //!
 //! A `Pack` is a pinned, ordered list of `ComplianceTest`s. Running a
 //! pack against a `Target` yields a `PackResult` whose `pack_hash` is
@@ -30,12 +31,14 @@ pub mod runner;
 pub mod target;
 pub mod tests_bundle;
 pub mod tests_helm;
+pub mod tests_helm_content;
 pub mod tests_oci;
 
 pub use runner::{ComplianceTest, Pack, PackResult, Runner, TestOutcome, TestRun, pack_hash};
 pub use target::{BundleMember, Target};
 
 /// Curated openclaw FedRAMP-High image-pack v1. Targets `Target::OciManifest`.
+/// Original 6-test pack — kept for back-compat with deployed listings.
 #[must_use]
 pub fn fedramp_high_openclaw_image_v1() -> Pack {
     Pack {
@@ -48,6 +51,87 @@ pub fn fedramp_high_openclaw_image_v1() -> Pack {
             Box::new(tests_oci::OciAllLayersAreSha256Pinned),
             Box::new(tests_oci::OciManifestSizeUnderFourMib),
             Box::new(tests_oci::OciSlsaProvenanceRefIsNonEmpty),
+        ],
+    }
+}
+
+/// FedRAMP-High image-pack v2 — extended with NIST 800-53 Rev 5 audit
+/// + supply-chain controls. Each new test cites the control it
+/// satisfies. Use this for new admissions; v1 stays available for
+/// existing listings.
+#[must_use]
+pub fn fedramp_high_openclaw_image_v2() -> Pack {
+    Pack {
+        id: "fedramp-high-openclaw-image".into(),
+        version: "2".into(),
+        tests: vec![
+            // CM-2 baseline configuration
+            Box::new(tests_oci::OciSchemaVersionIsTwo),
+            Box::new(tests_oci::OciHasOfficialMediaType),
+            Box::new(tests_oci::OciConfigDigestIsSha256),
+            Box::new(tests_oci::OciConfigUsesContentAddress),
+            // SI-7 software integrity
+            Box::new(tests_oci::OciAllLayersAreSha256Pinned),
+            Box::new(tests_oci::OciLayerSizesAreSensible),
+            // SC-5 resource bounds
+            Box::new(tests_oci::OciManifestSizeUnderFourMib),
+            // CM-7 least functionality
+            Box::new(tests_oci::OciManifestDeclaresOsAndArchitecture),
+            // AU-2 audit events
+            Box::new(tests_oci::OciHasCreatedTimestampAnnotation),
+            // CM-7 / SR-3 supply chain
+            Box::new(tests_oci::OciHasSourceAnnotation),
+            Box::new(tests_oci::OciHasRevisionAnnotation),
+            // SI-2 flaw remediation
+            Box::new(tests_oci::OciHasVersionAnnotation),
+            // CM-7 SLSA provenance
+            Box::new(tests_oci::OciSlsaProvenanceRefIsNonEmpty),
+        ],
+    }
+}
+
+/// FedRAMP-High openclaw helm-content pack v1 — runs against parsed
+/// chart sources (`Chart.yaml`, `values.yaml`, templates). 16 tests
+/// covering NIST 800-53 control families CM-2, SI-7, AC-3/6, CA-7,
+/// SC-7/13, IA-5, AU-2/12, CP-2, SR-3/4.
+///
+/// Distinct from `fedramp_high_openclaw_helm_v1` (which targets the
+/// helm-as-OCI manifest envelope). Both packs may apply to the same
+/// chart artifact and are composed in the bundle proof.
+#[must_use]
+pub fn fedramp_high_openclaw_helm_content_v1() -> Pack {
+    Pack {
+        id: "fedramp-high-openclaw-helm-content".into(),
+        version: "1".into(),
+        tests: vec![
+            // CM-2
+            Box::new(tests_helm_content::HelmChartApiVersionV2),
+            Box::new(tests_helm_content::HelmChartHasNameAndVersion),
+            Box::new(tests_helm_content::HelmValuesDeclareFedRampHighOverlay),
+            // SI-7
+            Box::new(tests_helm_content::HelmValuesNoLatestTags),
+            Box::new(tests_helm_content::HelmValuesImagesPinnedToDigest),
+            // AC-3 / AC-6
+            Box::new(tests_helm_content::HelmValuesRunAsNonRoot),
+            // SC-5
+            Box::new(tests_helm_content::HelmValuesDeclareResourceLimits),
+            // CA-7
+            Box::new(tests_helm_content::HelmValuesHasHealthProbes),
+            // SC-7
+            Box::new(tests_helm_content::HelmValuesHasNetworkPolicy),
+            Box::new(tests_helm_content::HelmValuesHasPodDisruptionBudget),
+            // IA-5
+            Box::new(tests_helm_content::HelmValuesNoPlaintextSecrets),
+            // SC-13
+            Box::new(tests_helm_content::HelmValuesIngressTlsConfigured),
+            // CP-2
+            Box::new(tests_helm_content::HelmValuesAtLeastTwoReplicas),
+            // AU-12
+            Box::new(tests_helm_content::HelmValuesHasMetricsMonitoring),
+            // SR-3 / SR-4
+            Box::new(tests_helm_content::HelmChartDependenciesPinned),
+            // CM-7
+            Box::new(tests_helm_content::HelmTemplatesNotEmpty),
         ],
     }
 }
