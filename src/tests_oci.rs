@@ -45,10 +45,15 @@ fn parse(bytes: &[u8]) -> Result<ParsedOciManifest, String> {
     serde_json::from_slice(bytes).map_err(|e| format!("manifest is not valid JSON: {e}"))
 }
 
-fn manifest_bytes(target: &Target) -> &[u8] {
+fn manifest_bytes(target: &Target) -> Option<&[u8]> {
     match target {
-        Target::OciManifest { bytes } => bytes,
+        Target::OciManifest { bytes } => Some(bytes),
+        _ => None,
     }
+}
+
+fn or_fail_for_oci(target: &Target) -> Result<&[u8], TestOutcome> {
+    manifest_bytes(target).ok_or_else(|| TestOutcome::fail("target is not an oci manifest"))
 }
 
 // ─── tests ──────────────────────────────────────────────────────────
@@ -58,8 +63,9 @@ impl ComplianceTest for OciSchemaVersionIsTwo {
     fn id(&self) -> &'static str { "oci.schema_version_is_two" }
     fn version(&self) -> &'static str { "1" }
     fn run(&self, target: &Target) -> TestOutcome {
-        match parse(manifest_bytes(target)) {
-            Ok(m) if m.schema_version == 2 => TestOutcome::Pass,
+        let bytes = match or_fail_for_oci(target) { Ok(b) => b, Err(e) => return e };
+        match parse(bytes) {
+            Ok(m) if m.schema_version == 2 => TestOutcome::pass(),
             Ok(m) => TestOutcome::Fail {
                 reason: format!("schemaVersion is {}, expected 2", m.schema_version),
             },
@@ -80,9 +86,10 @@ impl ComplianceTest for OciHasOfficialMediaType {
     fn id(&self) -> &'static str { "oci.has_official_media_type" }
     fn version(&self) -> &'static str { "1" }
     fn run(&self, target: &Target) -> TestOutcome {
-        match parse(manifest_bytes(target)) {
+        let bytes = match or_fail_for_oci(target) { Ok(b) => b, Err(e) => return e };
+        match parse(bytes) {
             Ok(m) => match m.media_type.as_deref() {
-                Some(mt) if OFFICIAL_MEDIA_TYPES.contains(&mt) => TestOutcome::Pass,
+                Some(mt) if OFFICIAL_MEDIA_TYPES.contains(&mt) => TestOutcome::pass(),
                 Some(mt) => TestOutcome::Fail {
                     reason: format!("mediaType {mt:?} is not on the official allowlist"),
                 },
@@ -100,10 +107,11 @@ impl ComplianceTest for OciConfigDigestIsSha256 {
     fn id(&self) -> &'static str { "oci.config_digest_is_sha256" }
     fn version(&self) -> &'static str { "1" }
     fn run(&self, target: &Target) -> TestOutcome {
-        match parse(manifest_bytes(target)) {
+        let bytes = match or_fail_for_oci(target) { Ok(b) => b, Err(e) => return e };
+        match parse(bytes) {
             Ok(m) => match m.config.and_then(|c| c.digest) {
                 Some(d) if d.starts_with("sha256:") && d.len() == "sha256:".len() + 64 => {
-                    TestOutcome::Pass
+                    TestOutcome::pass()
                 }
                 Some(d) => TestOutcome::Fail {
                     reason: format!("config.digest {d:?} is not sha256:<64hex>"),
@@ -122,7 +130,8 @@ impl ComplianceTest for OciAllLayersAreSha256Pinned {
     fn id(&self) -> &'static str { "oci.all_layers_are_sha256_pinned" }
     fn version(&self) -> &'static str { "1" }
     fn run(&self, target: &Target) -> TestOutcome {
-        match parse(manifest_bytes(target)) {
+        let bytes = match or_fail_for_oci(target) { Ok(b) => b, Err(e) => return e };
+        match parse(bytes) {
             Ok(m) => {
                 for (i, layer) in m.layers.iter().enumerate() {
                     let d = layer.digest.as_deref().unwrap_or("");
@@ -132,7 +141,7 @@ impl ComplianceTest for OciAllLayersAreSha256Pinned {
                         };
                     }
                 }
-                TestOutcome::Pass
+                TestOutcome::pass()
             }
             Err(e) => TestOutcome::Fail { reason: e },
         }
@@ -144,13 +153,12 @@ impl ComplianceTest for OciManifestSizeUnderFourMib {
     fn id(&self) -> &'static str { "oci.manifest_size_under_four_mib" }
     fn version(&self) -> &'static str { "1" }
     fn run(&self, target: &Target) -> TestOutcome {
-        let size = manifest_bytes(target).len();
+        let bytes = match or_fail_for_oci(target) { Ok(b) => b, Err(e) => return e };
+        let size = bytes.len();
         if size <= FOUR_MIB {
-            TestOutcome::Pass
+            TestOutcome::pass()
         } else {
-            TestOutcome::Fail {
-                reason: format!("manifest is {size} bytes; cap is {FOUR_MIB}"),
-            }
+            TestOutcome::fail(format!("manifest is {size} bytes; cap is {FOUR_MIB}"))
         }
     }
 }
@@ -164,7 +172,8 @@ impl ComplianceTest for OciSlsaProvenanceRefIsNonEmpty {
     fn id(&self) -> &'static str { "oci.slsa_provenance_ref_is_non_empty" }
     fn version(&self) -> &'static str { "1" }
     fn run(&self, target: &Target) -> TestOutcome {
-        match parse(manifest_bytes(target)) {
+        let bytes = match or_fail_for_oci(target) { Ok(b) => b, Err(e) => return e };
+        match parse(bytes) {
             Ok(m) => {
                 let ann = m.annotations.unwrap_or_default();
                 let candidates = [
@@ -175,7 +184,7 @@ impl ComplianceTest for OciSlsaProvenanceRefIsNonEmpty {
                 if candidates.iter().any(|k| {
                     ann.get(*k).is_some_and(|v| !v.is_empty())
                 }) {
-                    TestOutcome::Pass
+                    TestOutcome::pass()
                 } else {
                     TestOutcome::Fail {
                         reason: "no SLSA provenance annotation found on manifest".into(),
@@ -213,7 +222,7 @@ mod tests {
 
     #[test]
     fn schema_v2_passes_for_good_manifest() {
-        assert_eq!(OciSchemaVersionIsTwo.run(&target_from(GOOD_MANIFEST)), TestOutcome::Pass);
+        assert_eq!(OciSchemaVersionIsTwo.run(&target_from(GOOD_MANIFEST)), TestOutcome::pass());
     }
 
     #[test]
@@ -284,7 +293,7 @@ mod tests {
         let bare = r#"{"schemaVersion":2}"#;
         assert_eq!(
             OciAllLayersAreSha256Pinned.run(&target_from(bare)),
-            TestOutcome::Pass
+            TestOutcome::pass()
         );
     }
 
@@ -301,8 +310,8 @@ mod tests {
     fn slsa_annotation_passes_with_either_key() {
         let with_pleme = r#"{"schemaVersion":2,"annotations":{"io.pleme.slsa-provenance-ref":"ghcr.io/x"}}"#;
         let with_oci = r#"{"schemaVersion":2,"annotations":{"org.opencontainers.image.attestation.slsa.provenance":"ghcr.io/y"}}"#;
-        assert_eq!(OciSlsaProvenanceRefIsNonEmpty.run(&target_from(with_pleme)), TestOutcome::Pass);
-        assert_eq!(OciSlsaProvenanceRefIsNonEmpty.run(&target_from(with_oci)), TestOutcome::Pass);
+        assert_eq!(OciSlsaProvenanceRefIsNonEmpty.run(&target_from(with_pleme)), TestOutcome::pass());
+        assert_eq!(OciSlsaProvenanceRefIsNonEmpty.run(&target_from(with_oci)), TestOutcome::pass());
     }
 
     #[test]

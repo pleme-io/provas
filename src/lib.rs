@@ -28,12 +28,14 @@
 
 pub mod runner;
 pub mod target;
+pub mod tests_bundle;
+pub mod tests_helm;
 pub mod tests_oci;
 
 pub use runner::{ComplianceTest, Pack, PackResult, Runner, TestOutcome, TestRun, pack_hash};
-pub use target::Target;
+pub use target::{BundleMember, Target};
 
-/// Curated openclaw FedRAMP-High image-pack v1.
+/// Curated openclaw FedRAMP-High image-pack v1. Targets `Target::OciManifest`.
 #[must_use]
 pub fn fedramp_high_openclaw_image_v1() -> Pack {
     Pack {
@@ -46,6 +48,43 @@ pub fn fedramp_high_openclaw_image_v1() -> Pack {
             Box::new(tests_oci::OciAllLayersAreSha256Pinned),
             Box::new(tests_oci::OciManifestSizeUnderFourMib),
             Box::new(tests_oci::OciSlsaProvenanceRefIsNonEmpty),
+        ],
+    }
+}
+
+/// Curated openclaw FedRAMP-High helm-pack v1. Targets `Target::HelmManifest`.
+#[must_use]
+pub fn fedramp_high_openclaw_helm_v1() -> Pack {
+    Pack {
+        id: "fedramp-high-openclaw-helm".into(),
+        version: "1".into(),
+        tests: vec![
+            Box::new(tests_helm::HelmSchemaVersionIsTwo),
+            Box::new(tests_helm::HelmConfigMediaTypeIsHelm),
+            Box::new(tests_helm::HelmConfigDigestIsSha256),
+            Box::new(tests_helm::HelmLayersAreSha256Pinned),
+            Box::new(tests_helm::HelmLayersUseHelmMediaTypes),
+        ],
+    }
+}
+
+/// Curated openclaw FedRAMP-High bundle-pack v1. Targets
+/// `Target::Bundle`. Asserts the bundle is composed of at least one
+/// oci-image and one helm-chart, members are distinct, and every
+/// member carries a non-zero `pack_hash`. Member digests +
+/// `pack_hashes` are encoded as evidence on the relevant tests, so
+/// the bundle's `pack_hash` differentiates between bundles even when
+/// every test passes.
+#[must_use]
+pub fn fedramp_high_openclaw_bundle_v1() -> Pack {
+    Pack {
+        id: "fedramp-high-openclaw-bundle".into(),
+        version: "1".into(),
+        tests: vec![
+            Box::new(tests_bundle::BundleHasAtLeastOneOciImageMember),
+            Box::new(tests_bundle::BundleHasAtLeastOneHelmChartMember),
+            Box::new(tests_bundle::BundleMemberDigestsAreDistinct),
+            Box::new(tests_bundle::BundleAllMemberPackHashesNonZero),
         ],
     }
 }

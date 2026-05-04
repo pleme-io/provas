@@ -9,14 +9,46 @@ use crate::target::Target;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TestOutcome {
-    Pass,
-    Fail { reason: String },
+    /// Test passed. `evidence` may carry data observed at run time
+    /// (e.g. member `pack_hashes` for bundle tests). Evidence is part
+    /// of the `pack_hash`, so two bundles with different members
+    /// produce different `pack_hash`es even though both pass.
+    Pass {
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        evidence: Option<String>,
+    },
+    Fail {
+        reason: String,
+    },
 }
 
 impl TestOutcome {
+    /// Convenience: bare `Pass` with no evidence (common case).
     #[must_use]
-    pub fn is_pass(&self) -> bool {
-        matches!(self, Self::Pass)
+    pub const fn pass() -> Self {
+        Self::Pass { evidence: None }
+    }
+
+    /// Convenience: `Pass` carrying observed evidence (encoded into
+    /// the `pack_hash` so the proof is data-bound).
+    #[must_use]
+    pub fn pass_with(evidence: impl Into<String>) -> Self {
+        Self::Pass {
+            evidence: Some(evidence.into()),
+        }
+    }
+
+    /// Convenience: `Fail` with reason.
+    #[must_use]
+    pub fn fail(reason: impl Into<String>) -> Self {
+        Self::Fail {
+            reason: reason.into(),
+        }
+    }
+
+    #[must_use]
+    pub const fn is_pass(&self) -> bool {
+        matches!(self, Self::Pass { .. })
     }
 }
 
@@ -120,13 +152,20 @@ pub fn pack_hash(pack_id: &str, pack_version: &str, runs: &[TestRun]) -> Blake3H
         h.update(r.test_version.as_bytes());
         h.update(b"\0");
         match &r.outcome {
-            TestOutcome::Pass => h.update(b"pass\0"),
+            TestOutcome::Pass { evidence: None } => {
+                h.update(b"pass\0");
+            }
+            TestOutcome::Pass { evidence: Some(e) } => {
+                h.update(b"pass-with\0");
+                h.update(e.as_bytes());
+                h.update(b"\0");
+            }
             TestOutcome::Fail { reason } => {
                 h.update(b"fail\0");
                 h.update(reason.as_bytes());
-                h.update(b"\0")
+                h.update(b"\0");
             }
-        };
+        }
     }
     Blake3Hash(*h.finalize().as_bytes())
 }
@@ -139,7 +178,7 @@ mod tests {
     impl ComplianceTest for AlwaysPass {
         fn id(&self) -> &'static str { self.0 }
         fn version(&self) -> &'static str { "1" }
-        fn run(&self, _: &Target) -> TestOutcome { TestOutcome::Pass }
+        fn run(&self, _: &Target) -> TestOutcome { TestOutcome::pass() }
     }
     struct AlwaysFail(&'static str, &'static str);
     impl ComplianceTest for AlwaysFail {
@@ -208,7 +247,7 @@ mod tests {
         let runs = vec![TestRun {
             test_id: "x".into(),
             test_version: "1".into(),
-            outcome: TestOutcome::Pass,
+            outcome: TestOutcome::pass(),
         }];
         let h1 = pack_hash("a", "1", &runs);
         let h2 = pack_hash("b", "1", &runs);
@@ -220,7 +259,7 @@ mod tests {
         let runs = vec![TestRun {
             test_id: "x".into(),
             test_version: "1".into(),
-            outcome: TestOutcome::Pass,
+            outcome: TestOutcome::pass(),
         }];
         let h1 = pack_hash("a", "1", &runs);
         let h2 = pack_hash("a", "2", &runs);
@@ -230,12 +269,12 @@ mod tests {
     #[test]
     fn pack_hash_changes_on_test_order() {
         let runs_ab = vec![
-            TestRun { test_id: "a".into(), test_version: "1".into(), outcome: TestOutcome::Pass },
-            TestRun { test_id: "b".into(), test_version: "1".into(), outcome: TestOutcome::Pass },
+            TestRun { test_id: "a".into(), test_version: "1".into(), outcome: TestOutcome::pass() },
+            TestRun { test_id: "b".into(), test_version: "1".into(), outcome: TestOutcome::pass() },
         ];
         let runs_ba = vec![
-            TestRun { test_id: "b".into(), test_version: "1".into(), outcome: TestOutcome::Pass },
-            TestRun { test_id: "a".into(), test_version: "1".into(), outcome: TestOutcome::Pass },
+            TestRun { test_id: "b".into(), test_version: "1".into(), outcome: TestOutcome::pass() },
+            TestRun { test_id: "a".into(), test_version: "1".into(), outcome: TestOutcome::pass() },
         ];
         let h1 = pack_hash("p", "1", &runs_ab);
         let h2 = pack_hash("p", "1", &runs_ba);
