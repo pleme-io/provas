@@ -3,6 +3,7 @@
 
 use std::collections::BTreeMap;
 
+use serde::Deserialize;
 use tameshi::hash::Blake3Hash;
 
 #[derive(Debug, Clone)]
@@ -43,6 +44,14 @@ pub enum Target {
     /// `pack_hash` is data-bound (different members → different
     /// bundle `pack_hash`).
     Bundle { members: Vec<BundleMember> },
+
+    /// Rendered helm chart output: `helm template` produces a
+    /// multi-document YAML stream of Kubernetes resources. This
+    /// target carries each parsed document. Tests walk the
+    /// resources looking at PodSpecs, container security contexts,
+    /// resource limits, etc. — the controls that values.yaml
+    /// inspection cannot catch when templates hide configuration.
+    HelmRenderedTemplates { resources: Vec<serde_yaml_ng::Value> },
 }
 
 #[derive(Debug, Clone)]
@@ -69,6 +78,24 @@ impl Target {
     #[must_use]
     pub fn from_bundle_members(members: Vec<BundleMember>) -> Self {
         Self::Bundle { members }
+    }
+
+    /// Parse a `helm template` multi-document YAML stream into
+    /// `HelmRenderedTemplates`.
+    ///
+    /// # Errors
+    /// Returns yaml parse errors.
+    pub fn from_helm_rendered_yaml(yaml_stream: &str) -> Result<Self, serde_yaml_ng::Error> {
+        let mut resources = Vec::new();
+        for doc in serde_yaml_ng::Deserializer::from_str(yaml_stream) {
+            let value = serde_yaml_ng::Value::deserialize(doc)?;
+            // helm template emits `null` documents for empty
+            // separator-only sections; skip them.
+            if !matches!(value, serde_yaml_ng::Value::Null) {
+                resources.push(value);
+            }
+        }
+        Ok(Self::HelmRenderedTemplates { resources })
     }
 
     /// Parse Chart.yaml + values.yaml strings + templates map into a

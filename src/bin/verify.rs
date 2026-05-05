@@ -29,8 +29,9 @@ use std::process::ExitCode;
 use clap::Parser;
 use provas::{
     Pack, Runner, Target, fedramp_high_openclaw_bundle_v1,
-    fedramp_high_openclaw_helm_content_v1, fedramp_high_openclaw_helm_v1,
-    fedramp_high_openclaw_image_v1, fedramp_high_openclaw_image_v2,
+    fedramp_high_openclaw_helm_content_v1, fedramp_high_openclaw_helm_rendered_v1,
+    fedramp_high_openclaw_helm_v1, fedramp_high_openclaw_image_v1,
+    fedramp_high_openclaw_image_v2,
 };
 use serde::Deserialize;
 
@@ -279,6 +280,7 @@ fn resolve_pack(profile: &str) -> Option<Pack> {
         "fedramp-high-openclaw-image@2" => Some(fedramp_high_openclaw_image_v2()),
         "fedramp-high-openclaw-helm@1" => Some(fedramp_high_openclaw_helm_v1()),
         "fedramp-high-openclaw-helm-content@1" => Some(fedramp_high_openclaw_helm_content_v1()),
+        "fedramp-high-openclaw-helm-rendered@1" => Some(fedramp_high_openclaw_helm_rendered_v1()),
         "fedramp-high-openclaw-bundle@1" => Some(fedramp_high_openclaw_bundle_v1()),
         _ => None,
     }

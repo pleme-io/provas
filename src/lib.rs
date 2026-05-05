@@ -32,6 +32,7 @@ pub mod target;
 pub mod tests_bundle;
 pub mod tests_helm;
 pub mod tests_helm_content;
+pub mod tests_helm_rendered;
 pub mod tests_oci;
 
 pub use runner::{ComplianceTest, Pack, PackResult, Runner, TestOutcome, TestRun, pack_hash};
@@ -148,6 +149,33 @@ pub fn fedramp_high_openclaw_helm_v1() -> Pack {
             Box::new(tests_helm::HelmConfigDigestIsSha256),
             Box::new(tests_helm::HelmLayersAreSha256Pinned),
             Box::new(tests_helm::HelmLayersUseHelmMediaTypes),
+        ],
+    }
+}
+
+/// FedRAMP-High openclaw helm-rendered pack v1 — runs against the
+/// output of `helm template <chart>` (`Vec<Value>` of Kubernetes
+/// resources). Closes V13 from the fleet threat model: catches
+/// templates that hide non-compliant config from values.yaml
+/// inspection.
+///
+/// 7 NIST 800-53 Rev 5 controls verified at the rendered-resource
+/// level: AC-3 (runAsNonRoot, allowPrivilegeEscalation),
+/// AC-6 (privileged, capabilities, readOnlyRootFs), SC-5 (resource
+/// limits), SI-7 (image digest pinning).
+#[must_use]
+pub fn fedramp_high_openclaw_helm_rendered_v1() -> Pack {
+    Pack {
+        id: "fedramp-high-openclaw-helm-rendered".into(),
+        version: "1".into(),
+        tests: vec![
+            Box::new(tests_helm_rendered::HelmRenderedImagesArePinned),
+            Box::new(tests_helm_rendered::HelmRenderedPodsRunAsNonRoot),
+            Box::new(tests_helm_rendered::HelmRenderedContainersHaveResourceLimits),
+            Box::new(tests_helm_rendered::HelmRenderedNoPrivilegedContainers),
+            Box::new(tests_helm_rendered::HelmRenderedContainersDropAllCapabilities),
+            Box::new(tests_helm_rendered::HelmRenderedContainersHaveReadOnlyRootFs),
+            Box::new(tests_helm_rendered::HelmRenderedNoAllowPrivilegeEscalation),
         ],
     }
 }
