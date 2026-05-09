@@ -68,6 +68,11 @@ const STACK_CHART_YAML: &str =
 const STACK_VALUES: &str =
     include_str!("../../helmworks/charts/lareira-openclaw-stack/values.yaml");
 
+const WEB_CHART_YAML: &str =
+    include_str!("../../helmworks/charts/lareira-openclaw-web/Chart.yaml");
+const WEB_VALUES: &str =
+    include_str!("../../helmworks/charts/lareira-openclaw-web/values.yaml");
+
 #[test]
 fn lareira_openclaw_passes_fedramp_high() {
     run_pack_or_fail(OPENCLAW_CHART_YAML, OPENCLAW_VALUES, "lareira-openclaw");
@@ -91,4 +96,14 @@ fn lareira_openclaw_store_passes_fedramp_high() {
 #[test]
 fn lareira_openclaw_stack_passes_fedramp_high() {
     run_pack_or_fail(STACK_CHART_YAML, STACK_VALUES, "lareira-openclaw-stack");
+}
+
+#[test]
+fn lareira_openclaw_web_passes_fedramp_high() {
+    // Phase E1 — was the audit's #2 critical gap (zero hardening:
+    // no securityContext, no NetworkPolicy, no PDB, no
+    // ServiceAccount). E1 added all of those + readOnly rootfs +
+    // drop ALL caps + automountServiceAccountToken=false +
+    // seccompProfile RuntimeDefault.
+    run_pack_or_fail(WEB_CHART_YAML, WEB_VALUES, "lareira-openclaw-web");
 }
