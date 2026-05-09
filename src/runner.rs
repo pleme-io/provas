@@ -59,10 +59,92 @@ pub struct TestRun {
     pub outcome: TestOutcome,
 }
 
+/// Auditor-defensible mapping from a `ComplianceTest` to its
+/// authoritative source. Surfaced to verifiers via
+/// `ComplianceTest::citation()`. The `control_id` field is what an
+/// external auditor reads first; the `source_url` + `retrieved_at`
+/// fields prove provenance of the citation itself; `rationale` is
+/// the one-sentence "why this predicate satisfies (or contributes
+/// to) that control."
+///
+/// Citation is metadata, not part of `pack_hash`. Changing a citation
+/// without changing test semantics SHOULD NOT change `pack_hash` —
+/// the audit story improves but the byte-level proof is unchanged.
+/// If the test predicate itself changes, bump `version()` so the
+/// hash signal is unambiguous.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Citation {
+    pub control_id: &'static str,
+    pub source_url: &'static str,
+    pub retrieved_at: &'static str,
+    pub rationale: &'static str,
+}
+
+impl Citation {
+    /// Sentinel for tests not yet mapped to a control. Default
+    /// `ComplianceTest::citation()` returns this.
+    pub const UNCITED: Self = Self {
+        control_id: "",
+        source_url: "",
+        retrieved_at: "",
+        rationale: "",
+    };
+
+    /// NIST SP 800-53 Rev 5 control citation. URL points at the
+    /// canonical PDF; retrieved date snapshotted from the audit pass.
+    #[must_use]
+    pub const fn nist_800_53_r5(control_id: &'static str, rationale: &'static str) -> Self {
+        Self {
+            control_id,
+            source_url: "https://nvlpubs.nist.gov/nistpubs/SpecialPublications/NIST.SP.800-53r5.pdf",
+            retrieved_at: "2026-05-09",
+            rationale,
+        }
+    }
+
+    /// OCI Image Spec v1.1 citation (for predicates that enforce a spec
+    /// MUST/SHOULD rather than a 800-53 control directly). The
+    /// `control_id` carries `oci-image-spec/<section>` shape so the
+    /// auditor can grep the spec.
+    #[must_use]
+    pub const fn oci_image_spec_v1_1(section: &'static str, rationale: &'static str) -> Self {
+        Self {
+            control_id: section,
+            source_url: "https://github.com/opencontainers/image-spec/blob/v1.1.0/manifest.md",
+            retrieved_at: "2026-05-09",
+            rationale,
+        }
+    }
+
+    /// Kubernetes Pod Security Standards (Restricted profile) citation.
+    /// Used for helm-rendered tests that enforce a PSS field.
+    #[must_use]
+    pub const fn kubernetes_pss_restricted(field: &'static str, rationale: &'static str) -> Self {
+        Self {
+            control_id: field,
+            source_url: "https://kubernetes.io/docs/concepts/security/pod-security-standards/",
+            retrieved_at: "2026-05-09",
+            rationale,
+        }
+    }
+
+    #[must_use]
+    pub const fn is_uncited(&self) -> bool {
+        self.control_id.is_empty()
+    }
+}
+
 pub trait ComplianceTest: Send + Sync {
     fn id(&self) -> &'static str;
     fn version(&self) -> &'static str;
     fn run(&self, target: &Target) -> TestOutcome;
+
+    /// Authoritative-source mapping for this predicate. Default is
+    /// `Citation::UNCITED` so existing tests don't break; new tests
+    /// override and existing tests are upgraded one-by-one.
+    fn citation(&self) -> Citation {
+        Citation::UNCITED
+    }
 }
 
 pub struct Pack {

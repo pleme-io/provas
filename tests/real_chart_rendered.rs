@@ -9,7 +9,7 @@
 
 use std::process::Command;
 
-use provas::{Runner, Target, fedramp_high_openclaw_helm_rendered_v1};
+use provas::{Runner, Target, fedramp_high_openclaw_helm_rendered_v1, fedramp_high_openclaw_helm_rendered_v2};
 
 fn helm_available() -> bool {
     Command::new("helm")
@@ -104,4 +104,77 @@ fn real_lareira_openclaw_pki_rendered_passes_fedramp_high() {
         result.runs.len(),
         result.pack_hash.to_hex()
     );
+}
+
+/// Run v2 (PSS Restricted + NSA/CISA additions) against the same
+/// rendered output. Phase B records reality: v2 introduces stricter
+/// predicates (seccomp explicit, hostNetwork, automount-token,
+/// no-default-SA, NetworkPolicy presence, PDB-for-replicas≥2). Real
+/// charts that haven't yet been hardened against the new predicates
+/// will fail; that's the diagnostic signal Phase E targets.
+///
+/// Behaviour: print the per-test outcome, count pass/fail, then
+/// **assert** that core PSS Restricted invariants pass. The looser
+/// NSA/CISA additions (PDB, NetworkPolicy presence at chart layer,
+/// automount=false) report-only until Phase E.
+#[test]
+fn real_lareira_openclaw_pki_rendered_against_v2_pack() {
+    if !helm_available() {
+        eprintln!("SKIP: helm not on PATH; skipping real-chart-rendered v2 test");
+        return;
+    }
+    let yaml = match render_chart() {
+        Ok(y) => y,
+        Err(e) => {
+            eprintln!("SKIP: render_chart failed: {e}");
+            return;
+        }
+    };
+    let target = match Target::from_helm_rendered_yaml(&yaml) {
+        Ok(t) => t,
+        Err(e) => panic!("rendered YAML did not parse: {e}"),
+    };
+    let pack = fedramp_high_openclaw_helm_rendered_v2();
+    let result = Runner::run_pack(&pack, &target);
+    let total = result.runs.len();
+    let passes: Vec<&str> = result.runs.iter()
+        .filter(|r| r.outcome.is_pass())
+        .map(|r| r.test_id.as_str())
+        .collect();
+    let fails: Vec<(String, String)> = result.runs.iter()
+        .filter_map(|r| match &r.outcome {
+            provas::TestOutcome::Fail { reason } => Some((r.test_id.clone(), reason.clone())),
+            provas::TestOutcome::Pass { .. } => None,
+        })
+        .collect();
+    eprintln!(
+        "v2 pack against real lareira-openclaw-pki: {}/{} pass; pack_hash={}",
+        passes.len(), total, result.pack_hash.to_hex(),
+    );
+    for (id, why) in &fails {
+        eprintln!("  FAIL {id}: {why}");
+    }
+
+    // Phase-B hard assert: core PSS Restricted predicates MUST pass on
+    // the lareira-openclaw-pki chart (these are the v1 tests carried
+    // forward + the pure host-namespace bans, which the chart already
+    // satisfies through pleme-microservice's defaults).
+    let must_pass = [
+        "helm.rendered_pods_run_as_non_root",
+        "helm.rendered_no_privileged_containers",
+        "helm.rendered_containers_drop_all_capabilities",
+        "helm.rendered_containers_have_readonly_root_fs",
+        "helm.rendered_no_allow_privilege_escalation",
+        "helm.rendered_no_host_network",
+        "helm.rendered_no_host_pid",
+        "helm.rendered_no_host_ipc",
+        "helm.rendered_no_host_path",
+        "helm.rendered_no_host_port",
+    ];
+    for id in must_pass {
+        assert!(
+            passes.contains(&id),
+            "v2 PSS Restricted core predicate `{id}` must pass on lareira-openclaw-pki — chart regression",
+        );
+    }
 }

@@ -21,7 +21,7 @@
 
 use serde_yaml_ng::Value;
 
-use crate::runner::{ComplianceTest, TestOutcome};
+use crate::runner::{Citation, ComplianceTest, TestOutcome};
 use crate::target::Target;
 
 fn chart_and_values(target: &Target) -> Result<(&Value, &Value), TestOutcome> {
@@ -203,41 +203,148 @@ fn scan_image_tags(v: &Value, violations: &mut Vec<String>, path: &mut Vec<Strin
 /// Operative path varies by chart layout (top-level `securityContext`
 /// vs `pleme-microservice.securityContext` etc).
 ///
-/// For umbrella charts (no own image), this test checks that no
-/// subchart override explicitly sets `runAsNonRoot=false` — which
-/// would cascade to the deployed sub-workload.
+/// **Version 2 (2026-05-09):** previously the predicate only failed
+/// when an explicit `runAsNonRoot: false` was found anywhere — meaning
+/// charts that simply omitted the field passed silently. Per FedRAMP-
+/// High AC-3 / AC-6, absence is non-conformance: a real auditor wants
+/// the workload to *affirm* non-root, not merely not-deny it. v2 now
+/// requires at least one `runAsNonRoot: true` in the values map AND
+/// no `runAsNonRoot: false` anywhere. Umbrella charts (no own image —
+/// detected by absence of `image:` key at top level) still get a
+/// `pass_with("umbrella; subchart packs enforce")` to avoid false-
+/// positives on chart aggregators; the bundle pack composes member
+/// proofs.
 pub struct HelmValuesRunAsNonRoot;
 impl ComplianceTest for HelmValuesRunAsNonRoot {
     fn id(&self) -> &'static str { "helm.values_run_as_non_root" }
-    fn version(&self) -> &'static str { "1" }
+    fn version(&self) -> &'static str { "2" }
+    fn citation(&self) -> Citation {
+        Citation::nist_800_53_r5(
+            "AC-6",
+            "Container that runs as root violates least-privilege; require values.yaml to affirm runAsNonRoot=true and never set =false anywhere.",
+        )
+    }
     fn run(&self, target: &Target) -> TestOutcome {
         let (_, values) = match chart_and_values(target) { Ok(p) => p, Err(e) => return e };
-        // pleme-microservice's compliance overlay defaults runAsNonRoot
-        // for fedramp-high. The check is "no securityContext explicitly
-        // sets runAsNonRoot=false anywhere" — this applies to umbrella
-        // charts too, since their overrides cascade.
-        let mut violations = Vec::new();
-        scan_run_as_non_root_violations(values, &mut violations, &mut Vec::new());
-        if violations.is_empty() {
-            TestOutcome::pass()
-        } else {
-            TestOutcome::fail(format!(
+        // Hard fail on any explicit `runAsNonRoot: false` regardless of
+        // overlay path — that's an unambiguous AC-6 violation.
+        let (truthy, falsy) = scan_run_as_non_root(values, &mut Vec::new());
+        if !falsy.is_empty() {
+            return TestOutcome::fail(format!(
                 "values.yaml has runAsNonRoot=false at: {}",
-                violations.join(", ")
-            ))
+                falsy.join(", "),
+            ));
         }
+        // Affirmative path 1: explicit runAsNonRoot=true somewhere.
+        if !truthy.is_empty() {
+            return TestOutcome::pass_with(format!("runAsNonRoot=true at: {}", truthy.join(", ")));
+        }
+        // Affirmative path 2: chart consumes pleme-microservice with the
+        // fedramp-high overlay (which defaults runAsNonRoot=true in the
+        // subchart). Real lareira-openclaw-{pki,store,scanner,…} use this.
+        if uses_pleme_microservice_with_fedramp_high(values) {
+            return TestOutcome::pass_with(
+                "consumes pleme-microservice w/ fedramp-high overlay; subchart defaults runAsNonRoot=true",
+            );
+        }
+        // Affirmative path 3: chart wraps pleme-lib directly with a
+        // top-level `compliance.overlays: [fedramp-high]` declaration —
+        // pleme-lib's templates inject the security context based on
+        // the overlay. Real lareira-openclaw (the standalone cartorio
+        // wrapper) uses this pattern.
+        if has_top_level_fedramp_high_overlay(values) {
+            return TestOutcome::pass_with(
+                "top-level compliance.overlays=[fedramp-high]; pleme-lib injects securityContext.runAsNonRoot=true",
+            );
+        }
+        // Umbrella aggregator chart with no security surface of its own.
+        if is_umbrella_aggregator(values) {
+            return TestOutcome::pass_with(
+                "umbrella aggregator chart; runAsNonRoot enforced by member packs",
+            );
+        }
+        TestOutcome::fail(
+            "values.yaml has no runAsNonRoot=true anywhere AND chart does not opt into a subchart/pleme-lib path that affirms it — AC-6 demands the affirmative",
+        )
     }
 }
 
-fn scan_run_as_non_root_violations(v: &Value, out: &mut Vec<String>, path: &mut Vec<String>) {
+fn has_top_level_fedramp_high_overlay(v: &Value) -> bool {
+    let Value::Mapping(m) = v else { return false };
+    let Some(compliance) = m.iter().find_map(|(k, v)| {
+        (k.as_str() == Some("compliance")).then_some(v)
+    }) else {
+        return false;
+    };
+    let Value::Mapping(compliance_map) = compliance else { return false };
+    let Some(overlays) = compliance_map.iter().find_map(|(k, v)| {
+        (k.as_str() == Some("overlays")).then_some(v)
+    }) else {
+        return false;
+    };
+    let Value::Sequence(overlay_list) = overlays else { return false };
+    overlay_list.iter().any(|o| o.as_str() == Some("fedramp-high"))
+}
+
+fn uses_pleme_microservice_with_fedramp_high(v: &Value) -> bool {
+    let Value::Mapping(m) = v else { return false };
+    let Some(sub) = m.iter().find_map(|(k, v)| {
+        (k.as_str() == Some("pleme-microservice")).then_some(v)
+    }) else {
+        return false;
+    };
+    let Value::Mapping(sub_map) = sub else { return false };
+    let Some(compliance) = sub_map.iter().find_map(|(k, v)| {
+        (k.as_str() == Some("compliance")).then_some(v)
+    }) else {
+        return false;
+    };
+    let Value::Mapping(compliance_map) = compliance else { return false };
+    let Some(overlays) = compliance_map.iter().find_map(|(k, v)| {
+        (k.as_str() == Some("overlays")).then_some(v)
+    }) else {
+        return false;
+    };
+    let Value::Sequence(overlay_list) = overlays else { return false };
+    overlay_list.iter().any(|o| o.as_str() == Some("fedramp-high"))
+}
+
+fn is_umbrella_aggregator(v: &Value) -> bool {
+    let Value::Mapping(m) = v else { return false };
+    let has_image = m.iter().any(|(k, _)| k.as_str() == Some("image"));
+    let has_security = m.iter().any(|(k, _)| k.as_str() == Some("securityContext"));
+    let has_pleme_micro = m.iter().any(|(k, _)| k.as_str() == Some("pleme-microservice"));
+    !has_image && !has_security && !has_pleme_micro
+}
+
+fn scan_run_as_non_root(
+    v: &Value,
+    path: &mut Vec<String>,
+) -> (Vec<String>, Vec<String>) {
+    let mut truthy = Vec::new();
+    let mut falsy = Vec::new();
+    walk_run_as_non_root(v, path, &mut truthy, &mut falsy);
+    (truthy, falsy)
+}
+
+fn walk_run_as_non_root(
+    v: &Value,
+    path: &mut Vec<String>,
+    truthy: &mut Vec<String>,
+    falsy: &mut Vec<String>,
+) {
     if let Value::Mapping(m) = v {
         for (k, val) in m {
             if let Some(ks) = k.as_str() {
                 path.push(ks.to_string());
-                if ks == "runAsNonRoot" && val.as_bool() == Some(false) {
-                    out.push(path.join("."));
+                if ks == "runAsNonRoot" {
+                    match val.as_bool() {
+                        Some(true) => truthy.push(path.join(".")),
+                        Some(false) => falsy.push(path.join(".")),
+                        None => {}
+                    }
                 }
-                scan_run_as_non_root_violations(val, out, path);
+                walk_run_as_non_root(val, path, truthy, falsy);
                 path.pop();
             }
         }
@@ -654,6 +761,8 @@ pleme-microservice:
     repository: ghcr.io/pleme-io/openclaw-publisher-pki
     tag: 'sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc'
   replicaCount: 3
+  securityContext:
+    runAsNonRoot: true
   resources:
     requests: { cpu: 50m, memory: 64Mi }
     limits:   { cpu: 500m, memory: 256Mi }

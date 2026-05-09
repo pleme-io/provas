@@ -35,7 +35,7 @@ pub mod tests_helm_content;
 pub mod tests_helm_rendered;
 pub mod tests_oci;
 
-pub use runner::{ComplianceTest, Pack, PackResult, Runner, TestOutcome, TestRun, pack_hash};
+pub use runner::{Citation, ComplianceTest, Pack, PackResult, Runner, TestOutcome, TestRun, pack_hash};
 pub use target::{BundleMember, Target};
 
 /// Curated openclaw FedRAMP-High image-pack v1. Targets `Target::OciManifest`.
@@ -176,6 +176,108 @@ pub fn fedramp_high_openclaw_helm_rendered_v1() -> Pack {
             Box::new(tests_helm_rendered::HelmRenderedContainersDropAllCapabilities),
             Box::new(tests_helm_rendered::HelmRenderedContainersHaveReadOnlyRootFs),
             Box::new(tests_helm_rendered::HelmRenderedNoAllowPrivilegeEscalation),
+        ],
+    }
+}
+
+/// FedRAMP-High openclaw helm-rendered pack **v2** — extends v1 with
+/// the full Pod Security Standards Restricted profile + NSA/CISA
+/// Kubernetes Hardening Guide additions. v1 stays buildable for
+/// existing admissions in cartorio.
+///
+/// New since v1 (added 2026-05-09 per Phase B):
+/// - HelmRenderedNoHostNetwork / -HostPID / -HostIPC (PSS Baseline)
+/// - HelmRenderedNoHostPath / -HostPort (PSS Baseline)
+/// - HelmRenderedSeccompRuntimeDefault (PSS Restricted, SI-3)
+/// - HelmRenderedAddOnlyNetBindService (PSS Restricted, AC-6(9))
+/// - HelmRenderedAutomountTokenFalse (CIS 5.1.6, AC-3)
+/// - HelmRenderedNoDefaultServiceAccount (CIS 5.1.5, AC-3)
+/// - HelmRenderedHasPodDisruptionBudget (CP-2)
+/// - HelmRenderedHasNetworkPolicy (SC-7)
+#[must_use]
+pub fn fedramp_high_openclaw_helm_rendered_v2() -> Pack {
+    Pack {
+        id: "fedramp-high-openclaw-helm-rendered".into(),
+        version: "2".into(),
+        tests: vec![
+            // v1 carryover (citations refreshed in this pass)
+            Box::new(tests_helm_rendered::HelmRenderedImagesArePinned),
+            Box::new(tests_helm_rendered::HelmRenderedPodsRunAsNonRoot),
+            Box::new(tests_helm_rendered::HelmRenderedContainersHaveResourceLimits),
+            Box::new(tests_helm_rendered::HelmRenderedNoPrivilegedContainers),
+            Box::new(tests_helm_rendered::HelmRenderedContainersDropAllCapabilities),
+            Box::new(tests_helm_rendered::HelmRenderedContainersHaveReadOnlyRootFs),
+            Box::new(tests_helm_rendered::HelmRenderedNoAllowPrivilegeEscalation),
+            // v2 additions (PSS Restricted)
+            Box::new(tests_helm_rendered::HelmRenderedNoHostNetwork),
+            Box::new(tests_helm_rendered::HelmRenderedNoHostPID),
+            Box::new(tests_helm_rendered::HelmRenderedNoHostIPC),
+            Box::new(tests_helm_rendered::HelmRenderedNoHostPath),
+            Box::new(tests_helm_rendered::HelmRenderedNoHostPort),
+            Box::new(tests_helm_rendered::HelmRenderedSeccompRuntimeDefault),
+            Box::new(tests_helm_rendered::HelmRenderedAddOnlyNetBindService),
+            Box::new(tests_helm_rendered::HelmRenderedAutomountTokenFalse),
+            Box::new(tests_helm_rendered::HelmRenderedNoDefaultServiceAccount),
+            Box::new(tests_helm_rendered::HelmRenderedHasPodDisruptionBudget),
+            Box::new(tests_helm_rendered::HelmRenderedHasNetworkPolicy),
+        ],
+    }
+}
+
+/// FedRAMP-High openclaw image pack **v3** — extends v2 with OCI
+/// Image Spec v1.1-grounded predicates (semantic, not shape-only) +
+/// auditor-defensible NIST 800-53 Rev 5 citations. v1/v2 stay
+/// buildable so existing cartorio admissions remain verifiable.
+///
+/// Drops the `OciConfigUsesContentAddress` literal duplicate that v2
+/// carried (its `run()` body was identical to
+/// `OciConfigDigestIsSha256`).
+///
+/// New since v2 (added 2026-05-09 per Phase B):
+/// - OciNoUppercaseInDigestEncoded (OCI MUST NOT)
+/// - OciSourceAnnotationIsValidGitUrl (SR-4 semantic)
+/// - OciRevisionAnnotationIsHexSha (SR-4 semantic)
+/// - OciCreatedAnnotationIsRfc3339 (AU-3 semantic)
+/// - OciLicensesAnnotationIsValidSpdx (SA-22 semantic)
+/// - OciNoUnknownOrgOpencontainersImageKeys (CM-2; catches typo)
+/// - OciAllLayerMediaTypesAreKnown (CM-2)
+/// - OciHasSubjectIfClaimingInToto (SR-4 / OCI v1.1)
+/// - OciManifestMediaTypeIsCanonical (CM-2)
+/// - OciTitleAnnotationIsNonEmpty (CM-8)
+/// - OciVendorAnnotationIsNonEmpty (CM-8)
+/// - OciBaseNameAndDigestArePaired (SR-4)
+#[must_use]
+pub fn fedramp_high_openclaw_image_v3() -> Pack {
+    Pack {
+        id: "fedramp-high-openclaw-image".into(),
+        version: "3".into(),
+        tests: vec![
+            // v2 carryover — minus OciConfigUsesContentAddress duplicate
+            Box::new(tests_oci::OciSchemaVersionIsTwo),
+            Box::new(tests_oci::OciHasOfficialMediaType),
+            Box::new(tests_oci::OciConfigDigestIsSha256),
+            Box::new(tests_oci::OciAllLayersAreSha256Pinned),
+            Box::new(tests_oci::OciLayerSizesAreSensible),
+            Box::new(tests_oci::OciManifestSizeUnderFourMib),
+            Box::new(tests_oci::OciManifestDeclaresOsAndArchitecture),
+            Box::new(tests_oci::OciHasCreatedTimestampAnnotation),
+            Box::new(tests_oci::OciHasSourceAnnotation),
+            Box::new(tests_oci::OciHasRevisionAnnotation),
+            Box::new(tests_oci::OciHasVersionAnnotation),
+            Box::new(tests_oci::OciSlsaProvenanceRefIsNonEmpty),
+            // v3 additions (OCI v1.1 + semantic checks)
+            Box::new(tests_oci::OciNoUppercaseInDigestEncoded),
+            Box::new(tests_oci::OciSourceAnnotationIsValidGitUrl),
+            Box::new(tests_oci::OciRevisionAnnotationIsHexSha),
+            Box::new(tests_oci::OciCreatedAnnotationIsRfc3339),
+            Box::new(tests_oci::OciLicensesAnnotationIsValidSpdx),
+            Box::new(tests_oci::OciNoUnknownOrgOpencontainersImageKeys),
+            Box::new(tests_oci::OciAllLayerMediaTypesAreKnown),
+            Box::new(tests_oci::OciHasSubjectIfClaimingInToto),
+            Box::new(tests_oci::OciManifestMediaTypeIsCanonical),
+            Box::new(tests_oci::OciTitleAnnotationIsNonEmpty),
+            Box::new(tests_oci::OciVendorAnnotationIsNonEmpty),
+            Box::new(tests_oci::OciBaseNameAndDigestArePaired),
         ],
     }
 }
