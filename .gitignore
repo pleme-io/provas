@@ -3,3 +3,4 @@
 .DS_Store
 Cargo.lock
 result/
+Cargo.build-spec.json
